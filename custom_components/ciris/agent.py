@@ -17,8 +17,8 @@ from .const import (
     DOMAIN,
 )
 
-# Import the CIRIS SDK
-from .ciris_sdk.client import CIRISClient
+# Import the CIRIS SDK with HA wrapper
+from .ciris_ha_client import CIRISClient
 from .ciris_sdk.exceptions import CIRISError, CIRISTimeoutError
 
 _LOGGER = logging.getLogger(__name__)
@@ -68,7 +68,8 @@ class CIRISAgent(conversation.AbstractConversationAgent):
                 try:
                     token = await self._client.auth.login(username, password)
                     _LOGGER.info("Successfully logged in to CIRIS")
-                    self._client._transport.set_api_key(token.access_token)
+                    # Don't persist the token in HA context
+                    self._client._transport.set_api_key(token.access_token, persist=False)
                 except Exception as e:
                     _LOGGER.error(f"Failed to login to CIRIS: {e}")
                     raise

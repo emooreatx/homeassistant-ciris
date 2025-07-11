@@ -19,8 +19,8 @@ from .const import (
     DOMAIN,
 )
 
-# Import the CIRIS SDK
-from .ciris_sdk.client import CIRISClient
+# Import the CIRIS SDK with HA wrapper
+from .ciris_ha_client import CIRISClient
 from .ciris_sdk.exceptions import CIRISError, CIRISTimeoutError
 
 _LOGGER = logging.getLogger(__name__)
@@ -104,7 +104,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     try:
                         token = await client.auth.login(username, password)
                         _LOGGER.info("Successfully authenticated with CIRIS")
-                        client._transport.set_api_key(token.access_token)
+                        # Don't persist the token in HA context
+                        client._transport.set_api_key(token.access_token, persist=False)
                     except Exception as e:
                         _LOGGER.error(f"Failed to authenticate: {e}")
                         raise
