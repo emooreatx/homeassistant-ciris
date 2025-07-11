@@ -113,6 +113,9 @@ class CIRISAgent(conversation.AbstractConversationAgent):
                     conversation_id=user_input.conversation_id or ulid.ulid(),
                 )
             
+            # Get available devices for context
+            device_info = await self._get_device_info()
+            
             # Build context for CIRIS
             context = {
                 "source": "homeassistant",
@@ -123,10 +126,14 @@ class CIRISAgent(conversation.AbstractConversationAgent):
                     "user_id": user_input.context.user_id if user_input.context else None,
                     "parent_id": user_input.context.parent_id if user_input.context else None,
                 },
+                "available_devices": device_info,
                 "instructions": (
                     "You are integrated with Home Assistant. "
-                    "You can control devices if asked. "
-                    "Please SPEAK to respond, thank you!"
+                    "You can control devices by mentioning their names in your response. "
+                    "For example: 'I'll turn on the kitchen light for you' or "
+                    "'Let me switch off the bedroom fan'. "
+                    "The system will automatically execute these commands. "
+                    "Please SPEAK naturally and include the action in your response."
                 ),
             }
             
@@ -142,11 +149,7 @@ class CIRISAgent(conversation.AbstractConversationAgent):
                 _LOGGER.info(f"CIRIS responded in {response.processing_time_ms}ms with: '{response_text}'")
                 
                 # Check if CIRIS wants to control devices
-                # This is a simple implementation - could be enhanced
-                if "turn on" in response_text.lower() or "turn off" in response_text.lower():
-                    # Parse intent from CIRIS response
-                    # For now, just speak the response
-                    pass
+                await self._process_device_control(response_text, intent_response, user_input)
                 
                 intent_response.async_set_speech(response_text)
                 
@@ -171,6 +174,123 @@ class CIRISAgent(conversation.AbstractConversationAgent):
             response=intent_response,
             conversation_id=user_input.conversation_id or ulid.ulid(),
         )
+
+    async def _get_device_info(self) -> dict:
+        """Get information about available devices."""
+        from homeassistant.components import light, switch, fan, cover, climate
+        
+        device_info = {
+            "lights": [],
+            "switches": [],
+            "fans": [],
+            "covers": [],
+            "climate": []
+        }
+        
+        try:
+            # Get lights
+            for entity_id in self.hass.states.entity_ids("light"):
+                state = self.hass.states.get(entity_id)
+                if state:
+                    device_info["lights"].append({
+                        "entity_id": entity_id,
+                        "name": state.attributes.get("friendly_name", entity_id),
+                        "state": state.state
+                    })
+            
+            # Get switches
+            for entity_id in self.hass.states.entity_ids("switch"):
+                state = self.hass.states.get(entity_id)
+                if state:
+                    device_info["switches"].append({
+                        "entity_id": entity_id,
+                        "name": state.attributes.get("friendly_name", entity_id),
+                        "state": state.state
+                    })
+            
+            # Get fans
+            for entity_id in self.hass.states.entity_ids("fan"):
+                state = self.hass.states.get(entity_id)
+                if state:
+                    device_info["fans"].append({
+                        "entity_id": entity_id,
+                        "name": state.attributes.get("friendly_name", entity_id),
+                        "state": state.state
+                    })
+            
+            # Get covers (blinds, garage doors, etc)
+            for entity_id in self.hass.states.entity_ids("cover"):
+                state = self.hass.states.get(entity_id)
+                if state:
+                    device_info["covers"].append({
+                        "entity_id": entity_id,
+                        "name": state.attributes.get("friendly_name", entity_id),
+                        "state": state.state
+                    })
+                    
+            _LOGGER.debug(f"Found devices: {len(device_info['lights'])} lights, "
+                         f"{len(device_info['switches'])} switches, "
+                         f"{len(device_info['fans'])} fans, "
+                         f"{len(device_info['covers'])} covers")
+                         
+        except Exception as e:
+            _LOGGER.error(f"Error getting device info: {e}")
+            
+        return device_info
+
+    async def _process_device_control(
+        self, 
+        response_text: str, 
+        intent_response: intent.IntentResponse,
+        user_input: conversation.ConversationInput
+    ) -> None:
+        """Process device control commands from CIRIS response."""
+        import re
+        from homeassistant.helpers import intent as intent_helper
+        
+        # Simple pattern matching for common commands
+        # You can enhance this to parse more complex responses from CIRIS
+        
+        # Turn on/off pattern: "turn on the kitchen light" or "turning off bedroom fan"
+        turn_pattern = r'(turn(?:ing)?|switch(?:ing)?)\s+(on|off)\s+(?:the\s+)?(.+?)(?:\.|,|$)'
+        matches = re.finditer(turn_pattern, response_text.lower(), re.IGNORECASE)
+        
+        for match in matches:
+            action = match.group(2)  # "on" or "off"
+            target = match.group(3).strip()  # "kitchen light"
+            
+            _LOGGER.info(f"Detected device control: {action} {target}")
+            
+            try:
+                if action == "on":
+                    # Use Home Assistant's intent system
+                    intent_response.async_set_intent(
+                        intent_helper.INTENT_TURN_ON,
+                        {"name": {"value": target}}
+                    )
+                elif action == "off":
+                    intent_response.async_set_intent(
+                        intent_helper.INTENT_TURN_OFF,
+                        {"name": {"value": target}}
+                    )
+            except Exception as e:
+                _LOGGER.error(f"Error processing device control: {e}")
+        
+        # Toggle pattern: "toggle the garage door"
+        toggle_pattern = r'toggle\s+(?:the\s+)?(.+?)(?:\.|,|$)'
+        toggle_matches = re.finditer(toggle_pattern, response_text.lower(), re.IGNORECASE)
+        
+        for match in toggle_matches:
+            target = match.group(1).strip()
+            _LOGGER.info(f"Detected toggle: {target}")
+            
+            try:
+                intent_response.async_set_intent(
+                    intent_helper.INTENT_TOGGLE,
+                    {"name": {"value": target}}
+                )
+            except Exception as e:
+                _LOGGER.error(f"Error processing toggle: {e}")
 
     async def async_close(self) -> None:
         """Close the agent."""
