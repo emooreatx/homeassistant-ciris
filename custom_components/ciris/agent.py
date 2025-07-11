@@ -149,9 +149,17 @@ class CIRISAgent(conversation.AbstractConversationAgent):
                 _LOGGER.info(f"CIRIS responded in {response.processing_time_ms}ms with: '{response_text}'")
                 
                 # Check if CIRIS wants to control devices
-                await self._process_device_control(response_text, intent_response, user_input)
+                device_controlled = await self._process_device_control(response_text, user_input)
                 
+                # Set the speech response
                 intent_response.async_set_speech(response_text)
+                
+                # If we controlled a device, add a card to show what happened
+                if device_controlled:
+                    intent_response.async_set_card(
+                        "CIRIS Device Control",
+                        response_text
+                    )
                 
             except CIRISTimeoutError:
                 _LOGGER.warning("CIRIS timeout")
@@ -177,8 +185,6 @@ class CIRISAgent(conversation.AbstractConversationAgent):
 
     async def _get_device_info(self) -> dict:
         """Get information about available devices."""
-        from homeassistant.components import light, switch, fan, cover, climate
-        
         device_info = {
             "lights": [],
             "switches": [],
@@ -241,16 +247,14 @@ class CIRISAgent(conversation.AbstractConversationAgent):
     async def _process_device_control(
         self, 
         response_text: str, 
-        intent_response: intent.IntentResponse,
         user_input: conversation.ConversationInput
-    ) -> None:
+    ) -> bool:
         """Process device control commands from CIRIS response."""
         import re
-        from homeassistant.helpers import intent as intent_helper
+        
+        controlled_any = False
         
         # Simple pattern matching for common commands
-        # You can enhance this to parse more complex responses from CIRIS
-        
         # Turn on/off pattern: "turn on the kitchen light" or "turning off bedroom fan"
         turn_pattern = r'(turn(?:ing)?|switch(?:ing)?)\s+(on|off)\s+(?:the\s+)?(.+?)(?:\.|,|$)'
         matches = re.finditer(turn_pattern, response_text.lower(), re.IGNORECASE)
@@ -261,20 +265,28 @@ class CIRISAgent(conversation.AbstractConversationAgent):
             
             _LOGGER.info(f"Detected device control: {action} {target}")
             
-            try:
-                if action == "on":
-                    # Use Home Assistant's intent system
-                    intent_response.async_set_intent(
-                        intent_helper.INTENT_TURN_ON,
-                        {"name": {"value": target}}
-                    )
-                elif action == "off":
-                    intent_response.async_set_intent(
-                        intent_helper.INTENT_TURN_OFF,
-                        {"name": {"value": target}}
-                    )
-            except Exception as e:
-                _LOGGER.error(f"Error processing device control: {e}")
+            # Find matching entities
+            entity_id = await self._find_entity(target)
+            if entity_id:
+                try:
+                    if action == "on":
+                        await self.hass.services.async_call(
+                            entity_id.split(".")[0],  # domain (light, switch, etc)
+                            "turn_on",
+                            {"entity_id": entity_id},
+                            context=user_input.context
+                        )
+                        controlled_any = True
+                    elif action == "off":
+                        await self.hass.services.async_call(
+                            entity_id.split(".")[0],
+                            "turn_off",
+                            {"entity_id": entity_id},
+                            context=user_input.context
+                        )
+                        controlled_any = True
+                except Exception as e:
+                    _LOGGER.error(f"Error controlling device {entity_id}: {e}")
         
         # Toggle pattern: "toggle the garage door"
         toggle_pattern = r'toggle\s+(?:the\s+)?(.+?)(?:\.|,|$)'
@@ -284,13 +296,44 @@ class CIRISAgent(conversation.AbstractConversationAgent):
             target = match.group(1).strip()
             _LOGGER.info(f"Detected toggle: {target}")
             
-            try:
-                intent_response.async_set_intent(
-                    intent_helper.INTENT_TOGGLE,
-                    {"name": {"value": target}}
-                )
-            except Exception as e:
-                _LOGGER.error(f"Error processing toggle: {e}")
+            entity_id = await self._find_entity(target)
+            if entity_id:
+                try:
+                    await self.hass.services.async_call(
+                        entity_id.split(".")[0],
+                        "toggle",
+                        {"entity_id": entity_id},
+                        context=user_input.context
+                    )
+                    controlled_any = True
+                except Exception as e:
+                    _LOGGER.error(f"Error toggling device {entity_id}: {e}")
+                    
+        return controlled_any
+
+    async def _find_entity(self, name: str) -> str | None:
+        """Find entity ID by friendly name."""
+        name_lower = name.lower()
+        
+        # Check all domains
+        for domain in ["light", "switch", "fan", "cover", "climate"]:
+            for entity_id in self.hass.states.entity_ids(domain):
+                state = self.hass.states.get(entity_id)
+                if state:
+                    friendly_name = state.attributes.get("friendly_name", "").lower()
+                    # Check if the name matches or is contained in the friendly name
+                    if name_lower == friendly_name or name_lower in friendly_name:
+                        _LOGGER.info(f"Found entity {entity_id} for '{name}'")
+                        return entity_id
+                    
+                    # Also check entity_id itself (without domain)
+                    entity_name = entity_id.split(".")[1].replace("_", " ")
+                    if name_lower == entity_name or name_lower in entity_name:
+                        _LOGGER.info(f"Found entity {entity_id} for '{name}'")
+                        return entity_id
+        
+        _LOGGER.warning(f"Could not find entity for '{name}'")
+        return None
 
     async def async_close(self) -> None:
         """Close the agent."""
