@@ -8,7 +8,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN
-from .conversation import CIRISAgent
 
 _LOGGER = logging.getLogger(__name__)
 

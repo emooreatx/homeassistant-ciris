@@ -6,7 +6,6 @@ from homeassistant.components import conversation
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import intent
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import ulid
 
 from .const import (
@@ -28,30 +27,29 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
-) -> None:
+) -> bool:
     """Set up CIRIS conversation platform."""
     agent = CIRISAgent(hass, config_entry)
-    async_add_entities([agent])
+    conversation.async_set_agent(hass, config_entry, agent)
+    return True
+
+
+async def async_unload_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+) -> bool:
+    """Unload CIRIS conversation platform."""
+    conversation.async_unset_agent(hass, config_entry)
+    return True
 
 
 class CIRISAgent(conversation.AbstractConversationAgent):
     """CIRIS conversation agent."""
 
-    _attr_has_entity_name = True
-    _attr_name = None
-
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the agent."""
         self.hass = hass
         self.entry = entry
-        self._attr_unique_id = f"{entry.entry_id}-conversation"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": "CIRIS AI Assistant",
-            "manufacturer": "CIRIS AI",
-            "model": "CIRIS Agent",
-        }
         
         # API configuration
         self.api_url = entry.data[CONF_API_URL]
@@ -102,6 +100,11 @@ class CIRISAgent(conversation.AbstractConversationAgent):
     def supported_languages(self) -> list[str] | Literal["*"]:
         """Return supported languages."""
         return "*"  # Support all languages
+
+    @property
+    def attribution(self) -> str | None:
+        """Return attribution information."""
+        return "Powered by CIRIS AI"
 
     async def async_process(
         self, user_input: conversation.ConversationInput
@@ -184,8 +187,8 @@ class CIRISAgent(conversation.AbstractConversationAgent):
             conversation_id=user_input.conversation_id or ulid.ulid(),
         )
 
-    async def async_will_remove_from_hass(self) -> None:
-        """Clean up on removal."""
+    async def async_close(self) -> None:
+        """Close the agent."""
         if self._client and self._client_initialized:
             try:
                 await self._client.__aexit__(None, None, None)
