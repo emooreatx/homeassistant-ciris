@@ -2,7 +2,6 @@
 import logging
 from typing import Any
 
-import httpx
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
@@ -19,6 +18,10 @@ from .const import (
     DEFAULT_TIMEOUT,
     DOMAIN,
 )
+
+# Import the CIRIS SDK
+from .ciris_sdk.client import CIRISClient
+from .ciris_sdk.exceptions import CIRISError, CIRISTimeoutError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,10 +45,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     user_input.get(CONF_API_KEY),
                     user_input.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
                 )
-            except httpx.ConnectError:
-                errors["base"] = "cannot_connect"
-            except httpx.TimeoutException:
+            except CIRISTimeoutError:
                 errors["base"] = "timeout"
+            except CIRISError as e:
+                if "401" in str(e) or "unauthorized" in str(e).lower():
+                    errors["base"] = "invalid_auth"
+                else:
+                    errors["base"] = "cannot_connect"
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
@@ -77,26 +83,36 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, api_url: str, api_key: str | None, timeout: int
     ) -> None:
         """Test the API connection."""
-        headers = {"Content-Type": "application/json"}
+        # Use default credentials if no API key provided
+        if not api_key:
+            api_key = "admin:ciris_admin_password"
         
-        # Use limits to avoid blocking SSL operations
-        limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
-        
-        async with httpx.AsyncClient(
+        client = CIRISClient(
             base_url=api_url,
-            timeout=httpx.Timeout(timeout),
-            headers=headers,
-            limits=limits,
-            verify=False,  # Avoid SSL verification to prevent blocking calls
-        ) as client:
-            # First try without auth to see if API is reachable
-            response = await client.get("/v1/agent/status")
-            
-            # If we get 401, try with basic auth using default credentials
-            if response.status_code == 401 and not api_key:
-                # Try default CIRIS credentials
-                headers["Authorization"] = "Bearer admin:ciris_admin_password"
-                client.headers.update(headers)
-                response = await client.get("/v1/agent/status")
-            
-            response.raise_for_status()
+            api_key=api_key,
+            timeout=float(timeout),
+            max_retries=0
+        )
+        
+        try:
+            async with client:
+                # Handle username:password auth
+                if client._transport.api_key and ':' in client._transport.api_key:
+                    username, password = client._transport.api_key.split(':', 1)
+                    _LOGGER.info(f"Testing connection with username: {username}")
+                    
+                    try:
+                        token = await client.auth.login(username, password)
+                        _LOGGER.info("Successfully authenticated with CIRIS")
+                        client._transport.set_api_key(token.access_token)
+                    except Exception as e:
+                        _LOGGER.error(f"Failed to authenticate: {e}")
+                        raise
+                
+                # Test connection
+                status = await client.agent.get_status()
+                _LOGGER.info(f"Connected to CIRIS: {status.name} (state: {status.cognitive_state})")
+                
+        except Exception as e:
+            _LOGGER.error(f"Connection test failed: {e}")
+            raise

@@ -1,0 +1,6 @@
+Metadata-Version: 2.1
+Name: ciris-sdk
+Version: 0.1.0
+Summary: CIRIS SDK for Python
+Author: CIRIS AI
+Requires-Python: >=3.8

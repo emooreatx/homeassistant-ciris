@@ -15,6 +15,7 @@
     },
     "error": {
       "cannot_connect": "Failed to connect to CIRIS API",
+      "invalid_auth": "Invalid authentication credentials",
       "timeout": "Connection timeout",
       "unknown": "Unexpected error"
     },

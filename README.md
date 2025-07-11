@@ -9,7 +9,7 @@ This integration allows CIRIS to act as a conversation agent in Home Assistant, 
 3. Go to Settings → Devices & Services → Add Integration
 4. Search for "CIRIS"
 5. Enter your CIRIS API URL (e.g., `http://192.168.50.8:8080`)
-6. Optionally add an API key if your CIRIS instance requires authentication
+6. Leave API key blank to use default credentials (admin:ciris_admin_password)
 
 ## Configuration
 

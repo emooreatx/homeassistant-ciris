@@ -2,7 +2,6 @@
 import logging
 from typing import Any, Literal
 
-import httpx
 from homeassistant.components import conversation
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -18,6 +17,10 @@ from .const import (
     DEFAULT_TIMEOUT,
     DOMAIN,
 )
+
+# Import the CIRIS SDK
+from .ciris_sdk.client import CIRISClient
+from .ciris_sdk.exceptions import CIRISError, CIRISTimeoutError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,24 +59,44 @@ class CIRISAgent(conversation.AbstractConversationAgent):
         self.timeout = entry.data.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)
         self.channel = entry.data.get(CONF_CHANNEL, "homeassistant")
         
-        # HTTP client with SSL verification disabled to avoid blocking
-        self._client = httpx.AsyncClient(
-            base_url=self.api_url,
-            timeout=httpx.Timeout(self.timeout),
-            headers=self._get_headers(),
-            verify=False,
-            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
-        )
+        # Initialize CIRIS SDK client
+        self._client = None
+        self._client_initialized = False
 
-    def _get_headers(self) -> dict[str, str]:
-        """Get headers for API requests."""
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["X-API-Key"] = self.api_key
-        else:
-            # Use default CIRIS credentials if no API key provided
-            headers["Authorization"] = "Bearer admin:ciris_admin_password"
-        return headers
+    async def _ensure_client(self) -> CIRISClient:
+        """Ensure the CIRIS client is initialized."""
+        if self._client is None:
+            # Use default credentials if no API key provided
+            api_key = self.api_key
+            if not api_key:
+                api_key = "admin:ciris_admin_password"
+            
+            self._client = CIRISClient(
+                base_url=self.api_url,
+                api_key=api_key,
+                timeout=float(self.timeout),
+                max_retries=0  # No retries for conversation
+            )
+            
+        if not self._client_initialized:
+            await self._client.__aenter__()
+            
+            # Handle username:password auth
+            if self._client._transport.api_key and ':' in self._client._transport.api_key:
+                username, password = self._client._transport.api_key.split(':', 1)
+                _LOGGER.info(f"Using username/password auth for user: {username}")
+                
+                try:
+                    token = await self._client.auth.login(username, password)
+                    _LOGGER.info("Successfully logged in to CIRIS")
+                    self._client._transport.set_api_key(token.access_token)
+                except Exception as e:
+                    _LOGGER.error(f"Failed to login to CIRIS: {e}")
+                    raise
+            
+            self._client_initialized = True
+            
+        return self._client
 
     @property
     def supported_languages(self) -> list[str] | Literal["*"]:
@@ -87,9 +110,14 @@ class CIRISAgent(conversation.AbstractConversationAgent):
         intent_response = intent.IntentResponse(language=user_input.language)
         
         try:
+            client = await self._ensure_client()
+            
             # Check if CIRIS is available
-            status_response = await self._client.get("/v1/agent/status")
-            if status_response.status_code != 200:
+            try:
+                status = await client.agent.get_status()
+                _LOGGER.debug(f"CIRIS status: {status.name} (state: {status.cognitive_state})")
+            except Exception as e:
+                _LOGGER.error(f"Failed to get CIRIS status: {e}")
                 intent_response.async_set_speech(
                     "I'm having trouble connecting to CIRIS. Please check the configuration."
                 )
@@ -98,25 +126,32 @@ class CIRISAgent(conversation.AbstractConversationAgent):
                     conversation_id=user_input.conversation_id or ulid.ulid(),
                 )
             
-            # Add context for CIRIS
-            enhanced_message = (
-                f"{user_input.text}\n\n"
-                f"[This was received via Home Assistant conversation. "
-                f"You can control devices if asked. Please SPEAK to respond, thank you!]"
-            )
-            
-            # Send to CIRIS
-            interact_response = await self._client.post(
-                "/v1/agent/interact",
-                json={
-                    "message": enhanced_message,
-                    "channel_id": f"{self.channel}_{user_input.conversation_id or 'default'}",
+            # Build context for CIRIS
+            context = {
+                "source": "homeassistant",
+                "channel_id": f"{self.channel}_{user_input.conversation_id or 'default'}",
+                "input_method": "voice" if user_input.conversation_id else "text",
+                "language": user_input.language,
+                "hass_context": {
+                    "user_id": user_input.context.user_id if user_input.context else None,
+                    "parent_id": user_input.context.parent_id if user_input.context else None,
                 },
-            )
+                "instructions": (
+                    "You are integrated with Home Assistant. "
+                    "You can control devices if asked. "
+                    "Please SPEAK to respond, thank you!"
+                ),
+            }
             
-            if interact_response.status_code == 200:
-                result = interact_response.json()
-                response_text = result.get("content", "I didn't understand that.")
+            # Send to CIRIS using the SDK
+            try:
+                response = await client.agent.interact(
+                    message=user_input.text,
+                    context=context
+                )
+                
+                response_text = response.response
+                _LOGGER.info(f"CIRIS responded in {response.processing_time_ms}ms")
                 
                 # Check if CIRIS wants to control devices
                 # This is a simple implementation - could be enhanced
@@ -126,17 +161,20 @@ class CIRISAgent(conversation.AbstractConversationAgent):
                     pass
                 
                 intent_response.async_set_speech(response_text)
-            else:
+                
+            except CIRISTimeoutError:
+                _LOGGER.warning("CIRIS timeout")
+                intent_response.async_set_speech(
+                    "CIRIS is taking too long to respond. Please try again."
+                )
+            except CIRISError as e:
+                _LOGGER.error(f"CIRIS error: {e}")
                 intent_response.async_set_speech(
                     "I encountered an error processing your request."
                 )
                 
-        except httpx.TimeoutException:
-            intent_response.async_set_speech(
-                "CIRIS is taking too long to respond. Please try again."
-            )
         except Exception as e:
-            _LOGGER.error("Error processing with CIRIS: %s", e)
+            _LOGGER.error(f"Error processing with CIRIS: {e}", exc_info=True)
             intent_response.async_set_speech(
                 "I encountered an error. Please try again later."
             )
@@ -148,4 +186,8 @@ class CIRISAgent(conversation.AbstractConversationAgent):
 
     async def async_will_remove_from_hass(self) -> None:
         """Clean up on removal."""
-        await self._client.aclose()
+        if self._client and self._client_initialized:
+            try:
+                await self._client.__aexit__(None, None, None)
+            except Exception as e:
+                _LOGGER.error(f"Error closing CIRIS client: {e}")

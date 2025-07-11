@@ -1,0 +1,7 @@
+README.md
+setup.py
+ciris_sdk.egg-info/PKG-INFO
+ciris_sdk.egg-info/SOURCES.txt
+ciris_sdk.egg-info/dependency_links.txt
+ciris_sdk.egg-info/requires.txt
+ciris_sdk.egg-info/top_level.txt
