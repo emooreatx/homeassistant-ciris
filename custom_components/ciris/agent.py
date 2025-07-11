@@ -194,40 +194,32 @@ class CIRISAgent(conversation.AbstractConversationAgent):
         }
         
         try:
-            # Get lights
-            for entity_id in self.hass.states.entity_ids("light"):
-                state = self.hass.states.get(entity_id)
-                if state:
+            # Get all states at once
+            states = self.hass.states.async_all()
+            
+            for state in states:
+                entity_id = state.entity_id
+                domain = entity_id.split(".")[0]
+                
+                if domain == "light":
                     device_info["lights"].append({
                         "entity_id": entity_id,
                         "name": state.attributes.get("friendly_name", entity_id),
                         "state": state.state
                     })
-            
-            # Get switches
-            for entity_id in self.hass.states.entity_ids("switch"):
-                state = self.hass.states.get(entity_id)
-                if state:
+                elif domain == "switch":
                     device_info["switches"].append({
                         "entity_id": entity_id,
                         "name": state.attributes.get("friendly_name", entity_id),
                         "state": state.state
                     })
-            
-            # Get fans
-            for entity_id in self.hass.states.entity_ids("fan"):
-                state = self.hass.states.get(entity_id)
-                if state:
+                elif domain == "fan":
                     device_info["fans"].append({
                         "entity_id": entity_id,
                         "name": state.attributes.get("friendly_name", entity_id),
                         "state": state.state
                     })
-            
-            # Get covers (blinds, garage doors, etc)
-            for entity_id in self.hass.states.entity_ids("cover"):
-                state = self.hass.states.get(entity_id)
-                if state:
+                elif domain == "cover":
                     device_info["covers"].append({
                         "entity_id": entity_id,
                         "name": state.attributes.get("friendly_name", entity_id),
@@ -315,22 +307,28 @@ class CIRISAgent(conversation.AbstractConversationAgent):
         """Find entity ID by friendly name."""
         name_lower = name.lower()
         
-        # Check all domains
-        for domain in ["light", "switch", "fan", "cover", "climate"]:
-            for entity_id in self.hass.states.entity_ids(domain):
-                state = self.hass.states.get(entity_id)
-                if state:
-                    friendly_name = state.attributes.get("friendly_name", "").lower()
-                    # Check if the name matches or is contained in the friendly name
-                    if name_lower == friendly_name or name_lower in friendly_name:
-                        _LOGGER.info(f"Found entity {entity_id} for '{name}'")
-                        return entity_id
-                    
-                    # Also check entity_id itself (without domain)
-                    entity_name = entity_id.split(".")[1].replace("_", " ")
-                    if name_lower == entity_name or name_lower in entity_name:
-                        _LOGGER.info(f"Found entity {entity_id} for '{name}'")
-                        return entity_id
+        # Get all states
+        states = self.hass.states.async_all()
+        
+        # Check all entities
+        for state in states:
+            entity_id = state.entity_id
+            domain = entity_id.split(".")[0]
+            
+            # Only check controllable domains
+            if domain in ["light", "switch", "fan", "cover", "climate"]:
+                friendly_name = state.attributes.get("friendly_name", "").lower()
+                
+                # Check if the name matches or is contained in the friendly name
+                if name_lower == friendly_name or name_lower in friendly_name:
+                    _LOGGER.info(f"Found entity {entity_id} for '{name}'")
+                    return entity_id
+                
+                # Also check entity_id itself (without domain)
+                entity_name = entity_id.split(".")[1].replace("_", " ")
+                if name_lower == entity_name or name_lower in entity_name:
+                    _LOGGER.info(f"Found entity {entity_id} for '{name}'")
+                    return entity_id
         
         _LOGGER.warning(f"Could not find entity for '{name}'")
         return None
