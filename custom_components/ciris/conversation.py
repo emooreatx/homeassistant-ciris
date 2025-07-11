@@ -7,6 +7,7 @@ from homeassistant.components import conversation
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import intent
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import ulid
 
 from .const import (
@@ -24,14 +25,14 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
-    async_add_entities: conversation.AddEntitiesCallback,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up CIRIS conversation platform."""
     agent = CIRISAgent(hass, config_entry)
     async_add_entities([agent])
 
 
-class CIRISAgent(conversation.ConversationEntity):
+class CIRISAgent(conversation.AbstractConversationAgent):
     """CIRIS conversation agent."""
 
     _attr_has_entity_name = True
