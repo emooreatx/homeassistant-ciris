@@ -40,6 +40,7 @@ class CIRISClient(SDKCIRISClient):
         """Enter async context with SSL workaround."""
         # Create client with SSL verification disabled to avoid blocking
         import httpx
+        _LOGGER.info(f"Creating httpx client with base URL: {self._transport.base_url}")
         self._transport._client = httpx.AsyncClient(
             timeout=httpx.Timeout(self._transport.timeout),
             verify=False,  # Disable SSL verification to avoid blocking

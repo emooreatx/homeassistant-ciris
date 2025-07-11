@@ -50,6 +50,7 @@ class CIRISAgent(conversation.AbstractConversationAgent):
             if not api_key:
                 api_key = "admin:ciris_admin_password"
             
+            _LOGGER.info(f"Creating CIRIS client for URL: {self.api_url}")
             self._client = CIRISClient(
                 base_url=self.api_url,
                 api_key=api_key,
@@ -92,6 +93,7 @@ class CIRISAgent(conversation.AbstractConversationAgent):
         self, user_input: conversation.ConversationInput
     ) -> conversation.ConversationResult:
         """Process a sentence from the user."""
+        _LOGGER.info(f"CIRIS: Processing input: '{user_input.text}'")
         intent_response = intent.IntentResponse(language=user_input.language)
         
         try:
@@ -100,7 +102,7 @@ class CIRISAgent(conversation.AbstractConversationAgent):
             # Check if CIRIS is available
             try:
                 status = await client.agent.get_status()
-                _LOGGER.debug(f"CIRIS status: {status.name} (state: {status.cognitive_state})")
+                _LOGGER.info(f"CIRIS status check successful: {status.name} (state: {status.cognitive_state})")
             except Exception as e:
                 _LOGGER.error(f"Failed to get CIRIS status: {e}")
                 intent_response.async_set_speech(
@@ -130,13 +132,14 @@ class CIRISAgent(conversation.AbstractConversationAgent):
             
             # Send to CIRIS using the SDK
             try:
+                _LOGGER.info(f"CIRIS: Sending message to API with context: {context}")
                 response = await client.agent.interact(
                     message=user_input.text,
                     context=context
                 )
                 
                 response_text = response.response
-                _LOGGER.info(f"CIRIS responded in {response.processing_time_ms}ms")
+                _LOGGER.info(f"CIRIS responded in {response.processing_time_ms}ms with: '{response_text}'")
                 
                 # Check if CIRIS wants to control devices
                 # This is a simple implementation - could be enhanced
