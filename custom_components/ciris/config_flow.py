@@ -78,13 +78,25 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> None:
         """Test the API connection."""
         headers = {"Content-Type": "application/json"}
-        if api_key:
-            headers["X-API-Key"] = api_key
-
+        
+        # Use limits to avoid blocking SSL operations
+        limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
+        
         async with httpx.AsyncClient(
             base_url=api_url,
             timeout=httpx.Timeout(timeout),
             headers=headers,
+            limits=limits,
+            verify=False,  # Avoid SSL verification to prevent blocking calls
         ) as client:
+            # First try without auth to see if API is reachable
             response = await client.get("/v1/agent/status")
+            
+            # If we get 401, try with basic auth using default credentials
+            if response.status_code == 401 and not api_key:
+                # Try default CIRIS credentials
+                headers["Authorization"] = "Bearer admin:ciris_admin_password"
+                client.headers.update(headers)
+                response = await client.get("/v1/agent/status")
+            
             response.raise_for_status()

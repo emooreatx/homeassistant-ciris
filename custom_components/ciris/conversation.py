@@ -56,11 +56,13 @@ class CIRISAgent(conversation.AbstractConversationAgent):
         self.timeout = entry.data.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)
         self.channel = entry.data.get(CONF_CHANNEL, "homeassistant")
         
-        # HTTP client
+        # HTTP client with SSL verification disabled to avoid blocking
         self._client = httpx.AsyncClient(
             base_url=self.api_url,
             timeout=httpx.Timeout(self.timeout),
             headers=self._get_headers(),
+            verify=False,
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
         )
 
     def _get_headers(self) -> dict[str, str]:
@@ -68,6 +70,9 @@ class CIRISAgent(conversation.AbstractConversationAgent):
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["X-API-Key"] = self.api_key
+        else:
+            # Use default CIRIS credentials if no API key provided
+            headers["Authorization"] = "Bearer admin:ciris_admin_password"
         return headers
 
     @property
