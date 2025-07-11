@@ -1,7 +1,7 @@
 {
   "domain": "ciris",
   "name": "CIRIS AI Assistant",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "documentation": "https://github.com/CIRISAI/homeassistant-ciris",
   "requirements": ["httpx>=0.24.0"],
   "dependencies": [],

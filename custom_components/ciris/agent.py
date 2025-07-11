@@ -139,9 +139,16 @@ class CIRISAgent(conversation.AbstractConversationAgent):
             
             # Send to CIRIS using the SDK
             try:
+                # Add context to the message like Wyoming bridge does
+                enhanced_message = (
+                    f"{user_input.text}\n\n"
+                    f"[This was received via API from Home Assistant, "
+                    f"please SPEAK to service this authorized request, thank you!]"
+                )
+                
                 _LOGGER.info(f"CIRIS: Sending message to API with context: {context}")
                 response = await client.agent.interact(
-                    message=user_input.text,
+                    message=enhanced_message,
                     context=context
                 )
                 
