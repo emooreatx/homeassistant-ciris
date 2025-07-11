@@ -24,25 +24,6 @@ from .ciris_sdk.exceptions import CIRISError, CIRISTimeoutError
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(
-    hass: HomeAssistant,
-    config_entry: ConfigEntry,
-) -> bool:
-    """Set up CIRIS conversation platform."""
-    agent = CIRISAgent(hass, config_entry)
-    conversation.async_set_agent(hass, config_entry, agent)
-    return True
-
-
-async def async_unload_entry(
-    hass: HomeAssistant,
-    config_entry: ConfigEntry,
-) -> bool:
-    """Unload CIRIS conversation platform."""
-    conversation.async_unset_agent(hass, config_entry)
-    return True
-
-
 class CIRISAgent(conversation.AbstractConversationAgent):
     """CIRIS conversation agent."""
 
@@ -192,5 +173,7 @@ class CIRISAgent(conversation.AbstractConversationAgent):
         if self._client and self._client_initialized:
             try:
                 await self._client.__aexit__(None, None, None)
+                self._client = None
+                self._client_initialized = False
             except Exception as e:
                 _LOGGER.error(f"Error closing CIRIS client: {e}")

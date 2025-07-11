@@ -3,35 +3,52 @@ import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
+from homeassistant.components import conversation
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN
+from .agent import CIRISAgent
 
 _LOGGER = logging.getLogger(__name__)
-
-PLATFORMS = [Platform.CONVERSATION]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up CIRIS from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     
-    # Store the config entry data
-    hass.data[DOMAIN][entry.entry_id] = entry.data
+    # Create the conversation agent
+    agent = CIRISAgent(hass, entry)
     
-    # Forward to conversation platform
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    # Store the agent and config data
+    hass.data[DOMAIN][entry.entry_id] = {
+        "agent": agent,
+        "config": entry.data
+    }
+    
+    # Register the conversation agent
+    conversation.async_set_agent(hass, entry, agent)
+    
+    _LOGGER.info("CIRIS conversation agent registered successfully")
     
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    # Unregister the conversation agent
+    conversation.async_unset_agent(hass, entry)
     
-    if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+    # Clean up the agent
+    if entry.entry_id in hass.data[DOMAIN]:
+        entry_data = hass.data[DOMAIN][entry.entry_id]
+        if "agent" in entry_data:
+            agent = entry_data["agent"]
+            await agent.async_close()
     
-    return unload_ok
+    # Remove the data
+    hass.data[DOMAIN].pop(entry.entry_id, None)
+    
+    _LOGGER.info("CIRIS conversation agent unloaded successfully")
+    
+    return True

@@ -1,10 +1,10 @@
 {
   "domain": "ciris",
   "name": "CIRIS AI Assistant",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "documentation": "https://github.com/CIRISAI/homeassistant-ciris",
   "requirements": ["httpx>=0.24.0"],
-  "dependencies": ["conversation"],
+  "dependencies": [],
   "codeowners": ["@CIRISAI"],
   "config_flow": true,
   "iot_class": "cloud_polling"
